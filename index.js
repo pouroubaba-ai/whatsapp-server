@@ -1,7 +1,6 @@
 const express = require('express')
 const cors = require('cors')
 const qrcode = require('qrcode')
-const path = require('path')
 const fs = require('fs')
 const pino = require('pino')
 
@@ -11,7 +10,7 @@ app.use(express.json({ limit: '10mb' }))
 
 // ── State ────────────────────────────────────────────────────────────────────
 let sock = null
-let status = 'disconnected' // 'connecting' | 'qr_pending' | 'connected' | 'disconnected'
+let status = 'disconnected'
 let currentQr = null
 let isInitializing = false
 
@@ -22,28 +21,27 @@ async function initWhatsApp() {
   if (isInitializing || status === 'connected') return
   isInitializing = true
   status = 'connecting'
+  currentQr = null
 
   try {
     const {
       default: makeWASocket,
       useMultiFileAuthState,
       DisconnectReason,
-      fetchLatestBaileysVersion,
-      makeInMemoryStore,
     } = await import('@whiskeysockets/baileys')
 
     if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
-    const { version } = await fetchLatestBaileysVersion()
 
     sock = makeWASocket({
-      version,
       auth: state,
-      printQRInTerminal: false,
+      printQRInTerminal: true,
       logger: pino({ level: 'silent' }),
       generateHighQualityLinkPreview: false,
       browser: ['Yassen Academy', 'Chrome', '1.0.0'],
+      connectTimeoutMs: 60000,
+      defaultQueryTimeoutMs: 60000,
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -52,9 +50,13 @@ async function initWhatsApp() {
       const { connection, lastDisconnect, qr } = update
 
       if (qr) {
-        status = 'qr_pending'
-        currentQr = await qrcode.toDataURL(qr)
-        console.log('[WA] QR code ready — scan it')
+        try {
+          status = 'qr_pending'
+          currentQr = await qrcode.toDataURL(qr)
+          console.log('[WA] QR code ready')
+        } catch (e) {
+          console.error('[WA] QR generation error:', e.message)
+        }
       }
 
       if (connection === 'open') {
@@ -73,7 +75,7 @@ async function initWhatsApp() {
         sock = null
         isInitializing = false
         if (shouldReconnect) {
-          setTimeout(() => initWhatsApp(), 3000)
+          setTimeout(() => initWhatsApp().catch(console.error), 5000)
         }
       }
     })
@@ -83,6 +85,8 @@ async function initWhatsApp() {
     currentQr = null
     sock = null
     isInitializing = false
+    // Retry after 10s
+    setTimeout(() => initWhatsApp().catch(console.error), 10000)
   }
 }
 
@@ -120,10 +124,8 @@ app.post('/send', async (req, res) => {
     const jid = `${phone}@s.whatsapp.net`
 
     try {
-      // Send text
       await sock.sendMessage(jid, { text })
 
-      // Send PDF if provided
       if (pdfBase64) {
         const buffer = Buffer.from(pdfBase64, 'base64')
         await sock.sendMessage(jid, {
@@ -148,6 +150,5 @@ app.post('/send', async (req, res) => {
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`[SERVER] Listening on port ${PORT}`)
-  // Start WhatsApp immediately on boot
   initWhatsApp().catch(console.error)
 })
