@@ -24,8 +24,9 @@ async function initWhatsApp() {
   try {
     console.log('[WA] Loading baileys...')
     const baileys = await import('@whiskeysockets/baileys')
-    const makeWASocket = baileys.default?.default ?? baileys.default
-    const { useMultiFileAuthState, DisconnectReason } = baileys.default ?? baileys
+    const mod = baileys.default ?? baileys
+    const makeWASocket = mod.default ?? mod.makeWASocket ?? mod
+    const { useMultiFileAuthState, DisconnectReason } = mod
     console.log('[WA] Baileys loaded')
 
     if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
