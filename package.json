@@ -1,7 +1,7 @@
 {
   "name": "yassen-academy-whatsapp-server",
   "version": "1.0.0",
-  "description": "WhatsApp server for Yassen Academy payment notices",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

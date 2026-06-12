@@ -1,14 +1,15 @@
-const express = require('express')
-const cors = require('cors')
-const qrcode = require('qrcode')
-const fs = require('fs')
-const pino = require('pino')
+import express from 'express'
+import cors from 'cors'
+import qrcode from 'qrcode'
+import fs from 'fs'
+import pino from 'pino'
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys'
 
 const app = express()
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
-// ── State ────────────────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────────
 let sock = null
 let status = 'disconnected'
 let currentQr = null
@@ -24,12 +25,6 @@ async function initWhatsApp() {
   currentQr = null
 
   try {
-    const {
-      default: makeWASocket,
-      useMultiFileAuthState,
-      DisconnectReason,
-    } = await import('@whiskeysockets/baileys')
-
     if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
@@ -40,8 +35,6 @@ async function initWhatsApp() {
       logger: pino({ level: 'silent' }),
       generateHighQualityLinkPreview: false,
       browser: ['Yassen Academy', 'Chrome', '1.0.0'],
-      connectTimeoutMs: 60000,
-      defaultQueryTimeoutMs: 60000,
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -50,13 +43,9 @@ async function initWhatsApp() {
       const { connection, lastDisconnect, qr } = update
 
       if (qr) {
-        try {
-          status = 'qr_pending'
-          currentQr = await qrcode.toDataURL(qr)
-          console.log('[WA] QR code ready')
-        } catch (e) {
-          console.error('[WA] QR generation error:', e.message)
-        }
+        status = 'qr_pending'
+        currentQr = await qrcode.toDataURL(qr)
+        console.log('[WA] QR ready')
       }
 
       if (connection === 'open') {
@@ -69,32 +58,29 @@ async function initWhatsApp() {
       if (connection === 'close') {
         const code = lastDisconnect?.error?.output?.statusCode
         const shouldReconnect = code !== DisconnectReason.loggedOut
-        console.log('[WA] Disconnected. Code:', code, '— reconnect:', shouldReconnect)
+        console.log('[WA] Closed. Code:', code)
         status = 'disconnected'
         currentQr = null
         sock = null
         isInitializing = false
-        if (shouldReconnect) {
-          setTimeout(() => initWhatsApp().catch(console.error), 5000)
-        }
+        if (shouldReconnect) setTimeout(() => initWhatsApp().catch(console.error), 5000)
       }
     })
   } catch (err) {
-    console.error('[WA] Init error:', err.message)
+    console.error('[WA] Error:', err.message)
     status = 'disconnected'
     currentQr = null
     sock = null
     isInitializing = false
-    // Retry after 10s
     setTimeout(() => initWhatsApp().catch(console.error), 10000)
   }
 }
 
-// ── Routes ───────────────────────────────────────────────────────────────────
+// ── Routes ────────────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => res.json({ ok: true }))
 
-app.get('/status', async (req, res) => {
+app.get('/status', (req, res) => {
   if (status === 'disconnected' && !isInitializing) {
     initWhatsApp().catch(console.error)
   }
@@ -108,7 +94,7 @@ app.post('/send', async (req, res) => {
 
   const { messages } = req.body
   if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: 'messages array is required' })
+    return res.status(400).json({ error: 'messages array required' })
   }
 
   const results = []
@@ -120,26 +106,20 @@ app.post('/send', async (req, res) => {
       continue
     }
 
-    const phone = to.replace(/\D/g, '')
-    const jid = `${phone}@s.whatsapp.net`
+    const jid = `${to.replace(/\D/g, '')}@s.whatsapp.net`
 
     try {
       await sock.sendMessage(jid, { text })
-
       if (pdfBase64) {
-        const buffer = Buffer.from(pdfBase64, 'base64')
         await sock.sendMessage(jid, {
-          document: buffer,
+          document: Buffer.from(pdfBase64, 'base64'),
           mimetype: 'application/pdf',
           fileName: filename ?? 'avis-paiement.pdf',
         })
       }
-
       results.push({ to, success: true })
     } catch (err) {
-      const errMsg = err.message ?? 'send_failed'
-      const isNotOnWA = errMsg.includes('not-authorized') || errMsg.includes('not found')
-      results.push({ to, success: false, error: isNotOnWA ? 'not_on_whatsapp' : errMsg })
+      results.push({ to, success: false, error: err.message ?? 'send_failed' })
     }
   }
 
