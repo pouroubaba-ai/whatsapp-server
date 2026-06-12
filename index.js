@@ -3,7 +3,6 @@ import cors from 'cors'
 import qrcode from 'qrcode'
 import fs from 'fs'
 import pino from 'pino'
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys'
 
 const app = express()
 app.use(cors())
@@ -14,6 +13,7 @@ let sock = null
 let status = 'disconnected'
 let currentQr = null
 let isInitializing = false
+let lastError = null
 
 const AUTH_DIR = '/tmp/baileys_auth'
 
@@ -25,9 +25,16 @@ async function initWhatsApp() {
   currentQr = null
 
   try {
+    console.log('[WA] Importing baileys...')
+    const baileys = await import('@whiskeysockets/baileys')
+    const makeWASocket = baileys.default
+    const { useMultiFileAuthState, DisconnectReason } = baileys
+    console.log('[WA] Baileys imported OK')
+
     if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
 
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
+    console.log('[WA] Auth loaded, creating socket...')
 
     sock = makeWASocket({
       auth: state,
@@ -45,13 +52,14 @@ async function initWhatsApp() {
       if (qr) {
         status = 'qr_pending'
         currentQr = await qrcode.toDataURL(qr)
-        console.log('[WA] QR ready')
+        console.log('[WA] QR ready — scan it')
       }
 
       if (connection === 'open') {
         status = 'connected'
         currentQr = null
         isInitializing = false
+        lastError = null
         console.log('[WA] Connected!')
       }
 
@@ -68,11 +76,12 @@ async function initWhatsApp() {
     })
   } catch (err) {
     console.error('[WA] Error:', err.message)
+    lastError = err.message
     status = 'disconnected'
     currentQr = null
     sock = null
     isInitializing = false
-    setTimeout(() => initWhatsApp().catch(console.error), 10000)
+    setTimeout(() => initWhatsApp().catch(console.error), 15000)
   }
 }
 
@@ -84,7 +93,7 @@ app.get('/status', (req, res) => {
   if (status === 'disconnected' && !isInitializing) {
     initWhatsApp().catch(console.error)
   }
-  res.json({ status, qr: currentQr })
+  res.json({ status, qr: currentQr, error: lastError })
 })
 
 app.post('/send', async (req, res) => {
@@ -130,5 +139,6 @@ app.post('/send', async (req, res) => {
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`[SERVER] Listening on port ${PORT}`)
-  initWhatsApp().catch(console.error)
+  // Don't auto-init on boot — wait for first /status call
+  // This ensures the server responds even if baileys fails
 })
