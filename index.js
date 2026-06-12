@@ -32,12 +32,13 @@ async function initWhatsApp() {
     if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
 
+    const { Browsers } = mod
     sock = makeWASocket({
       auth: state,
       printQRInTerminal: true,
       logger: { level: 'silent', child: () => ({ level: 'silent', info: ()=>{}, error: ()=>{}, warn: ()=>{}, debug: ()=>{}, trace: ()=>{}, fatal: ()=>{} }), info: ()=>{}, error: ()=>{}, warn: ()=>{}, debug: ()=>{}, trace: ()=>{}, fatal: ()=>{} },
       generateHighQualityLinkPreview: false,
-      browser: ['Yassen Academy', 'Chrome', '1.0.0'],
+      browser: Browsers?.ubuntu('Chrome') ?? ['Ubuntu', 'Chrome', '120.0.0'],
     })
 
     sock.ev.on('creds.update', saveCreds)
