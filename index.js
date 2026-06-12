@@ -1,14 +1,12 @@
-import express from 'express'
-import cors from 'cors'
-import qrcode from 'qrcode'
-import fs from 'fs'
-import pino from 'pino'
+const express = require('express')
+const cors = require('cors')
+const qrcode = require('qrcode')
+const fs = require('fs')
 
 const app = express()
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
-// ── State ─────────────────────────────────────────────────────────────────────
 let sock = null
 let status = 'disconnected'
 let currentQr = null
@@ -17,7 +15,6 @@ let lastError = null
 
 const AUTH_DIR = '/tmp/baileys_auth'
 
-// ── Init WhatsApp ─────────────────────────────────────────────────────────────
 async function initWhatsApp() {
   if (isInitializing || status === 'connected') return
   isInitializing = true
@@ -25,21 +22,19 @@ async function initWhatsApp() {
   currentQr = null
 
   try {
-    console.log('[WA] Importing baileys...')
+    console.log('[WA] Loading baileys...')
     const baileys = await import('@whiskeysockets/baileys')
     const makeWASocket = baileys.default
     const { useMultiFileAuthState, DisconnectReason } = baileys
-    console.log('[WA] Baileys imported OK')
+    console.log('[WA] Baileys loaded')
 
     if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true })
-
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
-    console.log('[WA] Auth loaded, creating socket...')
 
     sock = makeWASocket({
       auth: state,
       printQRInTerminal: true,
-      logger: pino({ level: 'silent' }),
+      logger: { level: 'silent', child: () => ({ level: 'silent', info: ()=>{}, error: ()=>{}, warn: ()=>{}, debug: ()=>{}, trace: ()=>{}, fatal: ()=>{} }), info: ()=>{}, error: ()=>{}, warn: ()=>{}, debug: ()=>{}, trace: ()=>{}, fatal: ()=>{} },
       generateHighQualityLinkPreview: false,
       browser: ['Yassen Academy', 'Chrome', '1.0.0'],
     })
@@ -48,13 +43,11 @@ async function initWhatsApp() {
 
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
-
       if (qr) {
         status = 'qr_pending'
         currentQr = await qrcode.toDataURL(qr)
-        console.log('[WA] QR ready — scan it')
+        console.log('[WA] QR ready')
       }
-
       if (connection === 'open') {
         status = 'connected'
         currentQr = null
@@ -62,7 +55,6 @@ async function initWhatsApp() {
         lastError = null
         console.log('[WA] Connected!')
       }
-
       if (connection === 'close') {
         const code = lastDisconnect?.error?.output?.statusCode
         const shouldReconnect = code !== DisconnectReason.loggedOut
@@ -85,8 +77,6 @@ async function initWhatsApp() {
   }
 }
 
-// ── Routes ────────────────────────────────────────────────────────────────────
-
 app.get('/health', (req, res) => res.json({ ok: true }))
 
 app.get('/status', (req, res) => {
@@ -98,25 +88,17 @@ app.get('/status', (req, res) => {
 
 app.post('/send', async (req, res) => {
   if (status !== 'connected' || !sock) {
-    return res.status(503).json({ error: 'WhatsApp not connected', status })
+    return res.status(503).json({ error: 'not connected', status })
   }
-
   const { messages } = req.body
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: 'messages array required' })
   }
-
   const results = []
-
   for (const msg of messages) {
     const { to, text, pdfBase64, filename } = msg
-    if (!to || !text) {
-      results.push({ to, success: false, error: 'missing to or text' })
-      continue
-    }
-
+    if (!to || !text) { results.push({ to, success: false, error: 'missing fields' }); continue }
     const jid = `${to.replace(/\D/g, '')}@s.whatsapp.net`
-
     try {
       await sock.sendMessage(jid, { text })
       if (pdfBase64) {
@@ -128,17 +110,11 @@ app.post('/send', async (req, res) => {
       }
       results.push({ to, success: true })
     } catch (err) {
-      results.push({ to, success: false, error: err.message ?? 'send_failed' })
+      results.push({ to, success: false, error: err.message })
     }
   }
-
   res.json({ results })
 })
 
-// ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001
-app.listen(PORT, () => {
-  console.log(`[SERVER] Listening on port ${PORT}`)
-  // Don't auto-init on boot — wait for first /status call
-  // This ensures the server responds even if baileys fails
-})
+app.listen(PORT, () => console.log(`[SERVER] Port ${PORT}`))
