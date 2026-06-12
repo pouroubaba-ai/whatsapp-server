@@ -4,14 +4,14 @@
   "description": "WhatsApp server for Yassen Academy payment notices",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js"
+    "start": "node index.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "qrcode": "^1.5.3",
-    "whatsapp-web.js": "^1.23.0"
+    "pino": "^8.19.0",
+    "qrcode": "^1.5.3"
   },
   "engines": {
     "node": ">=18"
