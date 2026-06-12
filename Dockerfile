@@ -30,7 +30,5 @@ RUN npm install --omit=dev
 
 COPY index.js .
 
-VOLUME ["/data"]
-
 EXPOSE 3001
 CMD ["node", "index.js"]
